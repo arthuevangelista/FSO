@@ -75,17 +75,23 @@ void* t1(void* param){
 void* t2(void* param){
   // IMPLEMENTAR CHAVE MUTEX OU SEMÁFORO PARA EVITAR CONDIÇÃO DE CORRIDA
   // ENTRE DOIS OU MAIS THREADS TENTADO ACESSAR A MESMA FILA DE MENSAGENS
-  pa_Th* paramThread = (pa_Th *) param;
+  pa_Th* paramThread;
+
+  paramThread = (pa_Th*)malloc(sizeof(pa_Th));
+  paramThread = (pa_Th *) param;
+
   mqd_t mqdes;
   int i, rq, errsv;
 
-  struct timespec *timout;
+  struct timespec timout;
+  timout.tv_sec += 2; // timer setado para 2 segundo
+  timout.tv_nsec = 0;
 
-  char destUsr[MAX_NUM_USR];
   char nomeFila[(MAX_NUM_USR + 6)] = "/chat-";
-
-  if(strcmp(paramThread->dest,"all") >= 0){
+  if(strcmp(paramThread->dest,"all") == 0){
   // chama a thread para enviar para todos (essa comparação é melhor se feita dentro da thread de envio)
+  // caso tudo esteja certo e de acordo
+  pthread_exit(NULL);
   }else{
     strcat(nomeFila,paramThread->dest);
     mqdes = mq_open(nomeFila, O_WRONLY); errsv = errno;
@@ -94,20 +100,20 @@ void* t2(void* param){
         fprintf(stderr, "UNKNOWNUSER %s\n", paramThread->dest);
         pthread_exit(NULL);
       } // FIM DO SEGUNDO IF-ELSE DE UNKNOWN USER
-    } // FIM DO PRIMEIRO IF-ELSE DE UNKNOWN USER
+    }else{
     for (i = 0; i < 3; i++){ // 3 tentativas de envio
-      timespec->tv_sec = 1; // timer setado para 1 segundo
-      rq = mq_timedsend(mqdes, paramThread->corpoMsg, MAX_NUM_MSG, timout);
-      if(rq != 0) continue; // se não foi enviada, continue no laço for
+      rq = mq_timedsend(mqdes, paramThread->corpoMsg, MAX_NUM_MSG, (sysconf(_SC_MQ_PRIO_MAX)-1), &timout);
+      if(rq < 0) continue; // se não foi enviada, continue no laço for
     } // FIM DO LAÇO FOR DE TENTATIVAS DE ENVIO
-    if(rq != 0){
+    if(rq < 0){
        // se ainda não foi enviada, envia msg de erro
        fprintf(stderr, "ERRO %s:%s:%s\n", paramThread->nom, paramThread->dest, paramThread->corpoMsg);
     } // FIM DO ENVIO DA MENSAGEM DE ERRO DE ENVIO
-  } // FIM DO IF-ELSE DO BROADCAST
-
+   } // FIM DO PRIMEIRO IF-ELSE DE UNKNOWN USER
   // caso tudo esteja certo e de acordo
   pthread_exit(NULL);
+  } // FIM DO IF-ELSE DO BROADCAST
+
 } /* FIM DA THREAD DE ENVIO DE MENSAGENS */
 
 // =======================================================================
@@ -190,7 +196,7 @@ void main(int argc, char const *argv[]){
   act.sa_flags = SA_SIGINFO; // info sobre o sinal
 
   // Variáveis do tipo int para salvar códigos de erro
-  int rq, errsv, len;
+  int i, rq, errsv;
 
   // Declaração das variáveis contendo strings
   char corpoMsg[MAX_NUM_MSG], nomeUsr[MAX_NUM_USR], destUsr[MAX_NUM_USR];
@@ -198,6 +204,7 @@ void main(int argc, char const *argv[]){
 
   // Declaração da struct de parametros a serem enviados para thread
   pa_Th* paramThread;
+  paramThread = (pa_Th*)malloc(sizeof(pa_Th));
 
   // Direcionamento para o devido tratamento dos sinais
   sigaction(SIGINT, &act, NULL);
@@ -208,12 +215,11 @@ void main(int argc, char const *argv[]){
   fgets(nomeUsr,MAX_NUM_USR,stdin);
 
   // Remove o \n no final da string inserida
-  len = strlen(nomeUsr);
-  if( nomeUsr[len-1] == '\n' ) nomeUsr[len-1] = 0;
+  if( nomeUsr[strlen(nomeUsr)-1] == '\n' ) nomeUsr[strlen(nomeUsr)-1] = 0;
 
   system("clear");
   printf("Olá, %s, seja bem-vindo!\n", nomeUsr);
-  printf("Entrando na sala de chat da turma.");
+  printf("Entrando na sala de chat da turma. ");
   printf("Aguarde um momento...\n\n");
 
   // ABERTURA DA FILA DE MENSAGENS
@@ -232,32 +238,39 @@ void main(int argc, char const *argv[]){
     printf("Digite \"list\" para listar todos os usuários disponíveis\n");
     printf("Digite \"sair\" para sair do aplicativo\n");
     printf("===================================================\n");
+
+// LAME AS F**K
+    for(i = 0; i < strlen(destUsr); i++)
+	    destUsr[i] = '\0';
+	    paramThread->dest[i] = '\0';
+    for(i = 0; i < strlen(corpoMsg); i++)
+	    corpoMsg[i] = '\0';
+	    paramThread->corpoMsg[i] = '\0';
+
     // Inserção de destinatário
     fprintf(stderr,"%s:",nomeUsr); fgets(destUsr,(MAX_NUM_USR-1),stdin);
     // Remove o \n no final da string inserida
-    len = strlen(destUsr);
-    if( destUsr[len-1] == '\n' ) destUsr[len-1] = 0;
+    if( destUsr[strlen(destUsr)-1] == '\n' ) destUsr[strlen(destUsr)-1] = 0;
     // Comparação do console
-    if(strcmp(destUsr,"sair") >= 0){
+    if(strcmp(destUsr,"sair") == 0){
         rq = mq_close(mqdes); errsv = errno;
         if(rq == -1) trataErro(errsv);
-        strcat(nomeFila,nomeUsr); // Garante que não finaliza a fila do amiguinho
         rq = mq_unlink(nomeFila); errsv = errno;
         if(rq == -1) trataErro(errsv);
-        rq = pthread_cancel(enviaMsg); errsv = errno;
-        if(rq != 0) trataErro(errsv);
+        rq = pthread_cancel(enviaMsg);
         // rq = pthread_cancel(recebeMsg); errsv = errno;
         // if(rq != 0) trataErro(errsv);
         exit(EXIT_SUCCESS);
     }else{
-    	if(strcmp(destUsr,"list") >= 0){
+    	if(strcmp(destUsr,"list") == 0){
         listagemUsr();
     	}else{
         // Caso seja apenas um destinatário comum, echama thread de envio de msg
         fprintf(stderr, "Mensagem: "); fgets(corpoMsg,(MAX_NUM_MSG-1),stdin);
-        paramThread->nom = nomeUsr;
-        paramThread->dest = destUsr;
-        paramThread->corpoMsg = corpoMsg;
+	strcpy(paramThread->nom,nomeUsr);
+	strcpy(paramThread->dest,destUsr);
+printf("%s\n%s\n", destUsr, paramThread->dest);
+	strcpy(paramThread->corpoMsg,corpoMsg);
         rq = pthread_create(&enviaMsg, NULL, &t2, (void *) paramThread);
         errsv = errno;
         if(rq) trataErro(errsv);
