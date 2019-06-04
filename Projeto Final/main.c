@@ -4,7 +4,7 @@
  * Universidade de Brasília
  * campus Gama
  *
- * Versão: rev 1.01 (PC1)
+ * Versão: rev 1.03 (PC1)
  * Autor: Arthur Evangelista
  * Matrícula: 14/0016686
  *
@@ -19,8 +19,10 @@
  * =======================================================================
  * To-Do List para próximas versões:
  *    1_ Alterar nome do executável para:
- *      a.out => 140016686chat
- *    2_ ...
+ *      a) a.out => 140016686chat
+ *    2_ Implementar algo mais sofisticado que system clear
+ *    3_ Printar janela do terminal bonita pra sala de chat global
+ *      a) Talvez utilizar a biblioteca ncurses (testar linking com -lncurses)
  * =======================================================================
  */
 
@@ -33,6 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 // include das libs para thread, fila de mensagens e sinais
 #include <pthread.h>
@@ -44,16 +47,17 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#define MAX_NUM_USR (10 + 1)  // + 1 => \O
-#define MAX_NUM_MSG (500 + 1) // + 1 => \O
+#define MAX_NUM_USR (10 + 2)  // + 1 => \O
+#define MAX_NUM_MSG (500 + 2) // + 1 => \O
 
 // struct global para uso do sigaction
 struct sigaction act;
 
 // typedef com a struct de parametros a serem enviados para thread
 struct parTh{
-  char dest[(MAX_NUM_USR + 6)];
-  char corpoMsg[(MAX_NUM_MSG + 1)]; // +1 => \n
+  char nom[MAX_NUM_USR];
+  char dest[MAX_NUM_USR];
+  char corpoMsg[MAX_NUM_MSG];
 };
 
 typedef struct parTh pa_Th;
@@ -61,16 +65,50 @@ typedef struct parTh pa_Th;
 // =======================================================================
 // T1 => thread para recebimento de mensagens
 // =======================================================================
-void* recebeMsg(void* param){
+void* t1(void* param){
 
 }
 
 // =======================================================================
 // T2 => thread para envio de mensagens
 // =======================================================================
-void* enviaMsg(void* param){
+void* t2(void* param){
+  // IMPLEMENTAR CHAVE MUTEX OU SEMÁFORO PARA EVITAR CONDIÇÃO DE CORRIDA
+  // ENTRE DOIS OU MAIS THREADS TENTADO ACESSAR A MESMA FILA DE MENSAGENS
+  pa_Th* paramThread = (pa_Th *) param;
+  mqd_t mqdes;
+  int i, rq, errsv;
 
-}
+  struct timespec *timout;
+
+  char destUsr[MAX_NUM_USR];
+  char nomeFila[(MAX_NUM_USR + 6)] = "/chat-";
+
+  if(strcmp(paramThread->dest,"all") >= 0){
+  // chama a thread para enviar para todos (essa comparação é melhor se feita dentro da thread de envio)
+  }else{
+    strcat(nomeFila,paramThread->dest);
+    mqdes = mq_open(nomeFila, O_WRONLY); errsv = errno;
+    if(mqdes == (mqd_t) - 1){
+      if(errsv == ENOENT){
+        fprintf(stderr, "UNKNOWNUSER %s\n", paramThread->dest);
+        pthread_exit(NULL);
+      } // FIM DO SEGUNDO IF-ELSE DE UNKNOWN USER
+    } // FIM DO PRIMEIRO IF-ELSE DE UNKNOWN USER
+    for (i = 0; i < 3; i++){ // 3 tentativas de envio
+      timespec->tv_sec = 1; // timer setado para 1 segundo
+      rq = mq_timedsend(mqdes, paramThread->corpoMsg, MAX_NUM_MSG, timout);
+      if(rq != 0) continue; // se não foi enviada, continue no laço for
+    } // FIM DO LAÇO FOR DE TENTATIVAS DE ENVIO
+    if(rq != 0){
+       // se ainda não foi enviada, envia msg de erro
+       fprintf(stderr, "ERRO %s:%s:%s\n", paramThread->nom, paramThread->dest, paramThread->corpoMsg);
+    } // FIM DO ENVIO DA MENSAGEM DE ERRO DE ENVIO
+  } // FIM DO IF-ELSE DO BROADCAST
+
+  // caso tudo esteja certo e de acordo
+  pthread_exit(NULL);
+} /* FIM DA THREAD DE ENVIO DE MENSAGENS */
 
 // =======================================================================
 // Função para tratamento do sinal SIGINT
@@ -111,6 +149,15 @@ void trataErro(int errsv){
       fprintf(stderr, "Operação não permitida ao usuário!\n");
       exit(EXIT_FAILURE);
       break;
+    case EAGAIN:
+      fprintf(stderr, "O número máximo de threads imposto pelo sistema foi atingido!\n");
+      fprintf(stderr, "Entre em contato com o administrador do sistema! :)\n");
+      exit(EXIT_FAILURE);
+      break;
+    case ESRCH:
+      fprintf(stderr, "A thread a ser cancelada já foi finalizada!\n");
+      exit(EXIT_FAILURE);
+      break;
     case EBADF:
       fprintf(stderr, "O descritor da fila de mensagens é inválido!\n");
       exit(EXIT_FAILURE);
@@ -133,7 +180,7 @@ void trataErro(int errsv){
 void main(int argc, char const *argv[]){
   // Declaração das threads
   //pthread_t recebeMsg;
-  //pthread_t enviaMsg;
+  pthread_t enviaMsg;
 
   // Declaração do descritor da fila de mensagens
   mqd_t mqdes;
@@ -143,7 +190,7 @@ void main(int argc, char const *argv[]){
   act.sa_flags = SA_SIGINFO; // info sobre o sinal
 
   // Variáveis do tipo int para salvar códigos de erro
-  int rq, errsv;
+  int rq, errsv, len;
 
   // Declaração das variáveis contendo strings
   char corpoMsg[MAX_NUM_MSG], nomeUsr[MAX_NUM_USR], destUsr[MAX_NUM_USR];
@@ -157,10 +204,12 @@ void main(int argc, char const *argv[]){
 
   // limpa a tela
   system("clear");
-  // versões seguintes implementar algo mais sofisticado que system clear
-
   printf("Seja bem-vindo ao aplicativo de Chat!\n\nInsira seu nome: ");
   fgets(nomeUsr,MAX_NUM_USR,stdin);
+
+  // Remove o \n no final da string inserida
+  len = strlen(nomeUsr);
+  if( nomeUsr[len-1] == '\n' ) nomeUsr[len-1] = 0;
 
   system("clear");
   printf("Olá, %s, seja bem-vindo!\n", nomeUsr);
@@ -169,7 +218,6 @@ void main(int argc, char const *argv[]){
 
   // ABERTURA DA FILA DE MENSAGENS
   strcat(nomeFila,nomeUsr); // concatena as duas strings
-  fprintf(stderr, "%s\n", nomeFila);
   mqdes = mq_open(nomeFila, O_RDWR|O_CREAT|O_EXCL, S_IRUSR|S_IWUSR|S_IWOTH, NULL);
   errsv = errno;
   if(mqdes == (mqd_t) - 1){
@@ -178,33 +226,45 @@ void main(int argc, char const *argv[]){
     printf("Fila de mensagens aberta com sucesso!\n");
   }
 
-  // CRIAÇÃO DAS THREADS PARA ENVIO E RECEPÇÃO DE MENSAGENS
-  // printf("Threads criadas com sucesso!\n");
-
   while(1){
     system("clear");
-    // printar janela do terminal bonita pra sala de chat global
-
     printf("===================================================\n");
     printf("Digite \"list\" para listar todos os usuários disponíveis\n");
     printf("Digite \"sair\" para sair do aplicativo\n");
     printf("===================================================\n");
-    fprintf(stderr,"%s: ",nomeUsr); fgets(corpoMsg,(MAX_NUM_MSG-1),stdin);
-    if(strcmp(corpoMsg,"sair") >= 0){
+    // Inserção de destinatário
+    fprintf(stderr,"%s:",nomeUsr); fgets(destUsr,(MAX_NUM_USR-1),stdin);
+    // Remove o \n no final da string inserida
+    len = strlen(destUsr);
+    if( destUsr[len-1] == '\n' ) destUsr[len-1] = 0;
+    // Comparação do console
+    if(strcmp(destUsr,"sair") >= 0){
         rq = mq_close(mqdes); errsv = errno;
         if(rq == -1) trataErro(errsv);
+        strcat(nomeFila,nomeUsr); // Garante que não finaliza a fila do amiguinho
         rq = mq_unlink(nomeFila); errsv = errno;
         if(rq == -1) trataErro(errsv);
-        //pthread_kill();
-        //pthread_kill();
+        rq = pthread_cancel(enviaMsg); errsv = errno;
+        if(rq != 0) trataErro(errsv);
+        // rq = pthread_cancel(recebeMsg); errsv = errno;
+        // if(rq != 0) trataErro(errsv);
         exit(EXIT_SUCCESS);
     }else{
-	if(strcmp(corpoMsg,"list") >= 0){
-           listagemUsr();
-	}else{
-          // Caso seja apenas uma mensagem comum, chama thread de envio de msg
-          //pthread_create();
-	}
-    } // FIM DO SWITCH-CASE DO CORPO DA MSG
+    	if(strcmp(destUsr,"list") >= 0){
+        listagemUsr();
+    	}else{
+        // Caso seja apenas um destinatário comum, echama thread de envio de msg
+        fprintf(stderr, "Mensagem: "); fgets(corpoMsg,(MAX_NUM_MSG-1),stdin);
+        paramThread->nom = nomeUsr;
+        paramThread->dest = destUsr;
+        paramThread->corpoMsg = corpoMsg;
+        rq = pthread_create(&enviaMsg, NULL, &t2, (void *) paramThread);
+        errsv = errno;
+        if(rq) trataErro(errsv);
+        // Aguarda o retorno da thread de envio para retornar ao loop
+        // mudar isso aqui => função blockante !!!
+        pthread_join(enviaMsg, NULL);
+    	} // FIM DO SEGUNDO IF-ELSE DO CONSOLE
+    } // FIM DO PRIMEIRO IF-ELSE DO CONSOLE
   } // FIM DO LOOP INFINITO DO CHAT
 } // FIM DA FUNÇÃO MAIN
