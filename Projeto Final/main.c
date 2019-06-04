@@ -269,7 +269,6 @@ void main(int argc, char const *argv[]){
         fprintf(stderr, "Mensagem: "); fgets(corpoMsg,(MAX_NUM_MSG-1),stdin);
 	strcpy(paramThread->nom,nomeUsr);
 	strcpy(paramThread->dest,destUsr);
-printf("%s\n%s\n", destUsr, paramThread->dest);
 	strcpy(paramThread->corpoMsg,corpoMsg);
         rq = pthread_create(&enviaMsg, NULL, &t2, (void *) paramThread);
         errsv = errno;
