@@ -51,10 +51,12 @@
 struct sigaction act;
 
 // typedef com a struct de parametros a serem enviados para thread
-typedef struct parTh pa_Th{
+struct parTh{
   char dest[(MAX_NUM_USR + 6)];
   char corpoMsg[(MAX_NUM_MSG + 1)]; // +1 => \n
 };
+
+typedef struct parTh pa_Th;
 
 // =======================================================================
 // T1 => thread para recebimento de mensagens
@@ -187,9 +189,8 @@ void main(int argc, char const *argv[]){
     printf("Digite \"list\" para listar todos os usuários disponíveis\n");
     printf("Digite \"sair\" para sair do aplicativo\n");
     printf("===================================================\n");
-    printf("%s: ", nomeUsr); fgets(corpoMsg,(MAX_NUM_MSG-1),stdin);
-    switch (corpoMsg) {
-      case "sair":
+    fprintf(stderr,"%s: ",nomeUsr); fgets(corpoMsg,(MAX_NUM_MSG-1),stdin);
+    if(strcmp(corpoMsg,"sair") >= 0){
         rq = mq_close(mqdes); errsv = errno;
         if(rq == -1) trataErro(errsv);
         rq = mq_unlink(nomeFila); errsv = errno;
@@ -197,13 +198,13 @@ void main(int argc, char const *argv[]){
         //pthread_kill();
         //pthread_kill();
         exit(EXIT_SUCCESS);
-      case "list":
-        listagemUsr();
-        break;
-      default:
-      // Caso seja apenas uma mensagem comum, chama thread de envio de msg
-        //pthread_create();
-        break;
+    }else{
+	if(strcmp(corpoMsg,"list") >= 0){
+           listagemUsr();
+	}else{
+          // Caso seja apenas uma mensagem comum, chama thread de envio de msg
+          //pthread_create();
+	}
     } // FIM DO SWITCH-CASE DO CORPO DA MSG
   } // FIM DO LOOP INFINITO DO CHAT
 } // FIM DA FUNÇÃO MAIN
