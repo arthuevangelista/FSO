@@ -70,6 +70,7 @@
 
 // struct global para uso do sigaction
 struct sigaction act;
+struct sigevent sev;
 
 // typedef com a struct de parametros a serem enviados para thread
 typedef struct pa_Th{
@@ -149,8 +150,7 @@ void listagemUsr(){
   DIR* mqDir;
   struct dirent * atual;
 
-  fprintf(stderr, "%s\n%s\n", __FILE__, LOCAL_ROOT); // testar isso aqui
-  mqDir = opendir("dev/mqueue");
+  mqDir = opendir("/dev/mqueue");
   if(mqDir == NULL){
     fprintf(stderr, "Não há usuários online!\n");
     rq = closedir(mqDir);
@@ -164,8 +164,8 @@ void listagemUsr(){
   while ((atual = readdir(mqDir)) != NULL){
     if (atual->d_type == DT_REG){
       // Verifica se é um arquivo regular e imprime o nome do usuário
-      for(j = 6; j < strlen(atual->d_name); j++) temp[j] = atual->d_name[j];
-      fprintf(stderr, "%s\n", temp);
+//      for(j = 6; j < strlen(atual->d_name); j++) temp[j] = atual->d_name[j];
+      fprintf(stderr, "%s\n", atual->d_name);
       i++;
     } // FIM DO IF-ELSE DE CHECAGEM DE ARQUIVO REGULAR
   } // FIM DO WHILE DE LEITURA DO DIRETÓRIO
@@ -178,28 +178,30 @@ void listagemUsr(){
 // =======================================================================
 // T1 => thread para recebimento de mensagens
 // =======================================================================
-void* t1(void* param){
-  pa_Th* paramThread;
-  paramThread = (pa_Th*)malloc(sizeof(pa_Th));
-  paramThread = (pa_Th *) param;
-
+static void t1(union sigval sv){
   mqd_t mqdes;
   int rq, errsv = 0;
 
+  char nomeUsr[MAX_NUM_USR];
+  strcpy(nomeUsr,(char *)sv.sival_ptr);
+
   char nomeFila[(MAX_NUM_USR + 6)] = "/chat-";
   char buffer[MAX_NUM_MSG];
-  strcat(nomeFila,paramThread->nom);
+
+  strcat(nomeFila,nomeUsr);
   mqdes = mq_open(nomeFila, O_RDONLY | O_NONBLOCK);
+
+// Checa a primeira vez antes de entrar no while
+  rq = mq_receive(mqdes, buffer, MAX_NUM_MSG, NULL); errsv = errno;
+  fprintf(stderr, "%s: %s\n", "dest"/*quem enviou a msg*/,buffer);
+
   while ((rq == -1) && (errsv == EAGAIN)){
     // Enquanto a fila de mensagens não estiver vazia, realiza a leitura
     rq = mq_receive(mqdes, buffer, MAX_NUM_MSG, NULL);
-    errsv = errno;
+    fprintf(stderr, "%s: %s\n", "dest"/*quem enviou a msg*/,buffer);
   } // FIM DO WHILE DE LEITURA DAS MENSAGENS
 
-  fprintf(stderr, "%s: %s\n", "dest"/*quem enviou a msg*/,buffer);
-
-  free(paramThread);
-  pthread_exit(NULL);
+return;
 } // FIM DA THREAD DE RECEBIMENTO DE MENSAGENS
 
 // =======================================================================
@@ -217,7 +219,7 @@ void* t2(void* param){
   int i, j, rq, errsv;
 
   struct timespec timout;
-  timout.tv_sec += 2; // timer setado para 2 segundo
+  timout.tv_sec = 2; // timer setado para 2 segundos
   timout.tv_nsec = 0;
 
   char nomeFila[(MAX_NUM_USR + 6)] = "/chat-";
@@ -228,13 +230,12 @@ void* t2(void* param){
   DIR* mqDir;
   struct dirent * atual;
 
-  mqDir = opendir("~/dev/mqueue");
+  mqDir = opendir("/dev/mqueue");
   while ((atual = readdir(mqDir)) != NULL){
     if (atual->d_type == DT_REG){
         // Verifica se é um arquivo regular e envia msg pro usuário
         // no lugar de temp estava atual->d_name
         mqdes = mq_open(atual->d_name, O_WRONLY | O_NONBLOCK); errsv = errno;
-        if(mqdes == (mqd_t) - 1) trataErro(errsv);
         rq = mq_send(mqdes, paramThread->corpoMsg, strlen(paramThread->corpoMsg), (sysconf(_SC_MQ_PRIO_MAX)-1)); errsv = errno;
         if((rq == -1) && (errsv == EAGAIN)){
           // fecha fila atual e tenta enviar com mq_timedsend por 3 vezes
@@ -245,16 +246,14 @@ void* t2(void* param){
             if(rq < 0) continue; // se não foi enviada, continue no laço for
           }
           // se ainda não foi enviada, envia msg de erro
-          for(j = 6; j < strlen(atual->d_name); j++) temp[j] = atual->d_name[j];
-          if(rq < 0) fprintf(stderr, "ERRO %s:%s:%s\n", paramThread->nom, temp, paramThread->corpoMsg);
+//          for(j = 6; j < strlen(atual->d_name); j++) temp[j] = atual->d_name[j];
+          if(rq < 0) fprintf(stderr, "ERRO %s:%s:%s\n", paramThread->nom, atual->d_name, paramThread->corpoMsg);
         } // FIM DO IF-ELSE DE ERRO DE ENVIO
       } // FIM DO IF-ELSE DE CHECAGEM DE ARQUIVO REGULAR
     } // FIM DO WHILE DE LEITURA DO DIRETÓRIO
 
-  rq = closedir(mqDir); errsv = errno;
-  if(rq == -1) trataErro(errsv);
-
   // caso tudo esteja certo e de acordo
+  rq = closedir(mqDir);
   free(paramThread);
   pthread_exit(NULL);
   }else{
@@ -262,7 +261,7 @@ void* t2(void* param){
     mqdes = mq_open(nomeFila, O_WRONLY | O_NONBLOCK); errsv = errno;
     if((mqdes == (mqd_t) - 1) && (errsv == ENOENT)){
         fprintf(stderr, "UNKNOWNUSER %s\n", paramThread->dest);
-        free(paramThread);
+        if(paramThread != NULL) free(paramThread);
         pthread_exit(NULL);
     } // FIM DO IF-ELSE DE UNKNOWN USER
 
@@ -280,7 +279,7 @@ void* t2(void* param){
     } // FIM DO IF-ELSE DE ERRO DE ENVIO
 
   // caso tudo esteja certo e de acordo
-  free(paramThread);
+  if(paramThread != NULL) free(paramThread);
   pthread_exit(NULL);
   } // FIM DO IF-ELSE DO BROADCAST
 
@@ -328,6 +327,12 @@ void main(int argc, char const *argv[]){
   errsv = errno;
   if(mqdes == (mqd_t) - 1) trataErro(errsv);
 
+  // INICIALICAÇÃO DA THREAD DE RECEBIMENTO DE MENSAGENS
+  sev.sigev_notify = SIGEV_THREAD;
+  sev.sigev_notify_function = t1;
+  sev.sigev_notify_attributes = NULL;
+  sev.sigev_value.sival_ptr = &nomeUsr; 
+
   system("clear");
   printf("===================================================\n");
   printf("Digite \"list\" para listar todos os usuários disponíveis\n");
@@ -335,18 +340,15 @@ void main(int argc, char const *argv[]){
   printf("===================================================\n");
   while(1){
     // LAME AS F**K (limpeza das strings a cada loop)
-    for(i = 0; i < strlen(destUsr); i++)
+    for(i = 0; i < strlen(destUsr); i++){
 	    destUsr[i] = '\0';
-	    paramThread->dest[i] = '\0';
-    for(i = 0; i < strlen(corpoMsg); i++)
+	    paramThread->dest[i] = '\0';}
+    for(i = 0; i < strlen(corpoMsg); i++){
 	    corpoMsg[i] = '\0';
-	    paramThread->corpoMsg[i] = '\0';
+	    paramThread->corpoMsg[i] = '\0';}
 
-    // INICIALICAÇÃO DA THREAD DE RECEBIMENTO DE MENSAGENS
-    strcpy(paramThread->nom,nomeUsr);
-    rq = pthread_create(&recebeMsg, NULL, &t1, (void *) paramThread);
-    errsv = errno;
-    if(rq) trataErro(errsv);
+    // Registro de notificação (sem tratamento de erro mesmo)
+    rq = mq_notify(mqdes,&sev);
 
     // Inserção de destinatário
     fprintf(stderr,"%s:",nomeUsr); fgets(destUsr,(MAX_NUM_USR-1),stdin);
@@ -360,7 +362,7 @@ void main(int argc, char const *argv[]){
         if(rq == -1) trataErro(errsv);
         pthread_cancel(enviaMsg);
         pthread_cancel(recebeMsg);
-        free(paramThread);
+        if(paramThread != NULL) free(paramThread);
         exit(EXIT_SUCCESS);
     }else{
     	if(strcmp(destUsr,"list") == 0){
@@ -368,13 +370,14 @@ void main(int argc, char const *argv[]){
     	}else{
         // Caso seja apenas um destinatário comum, chama thread de envio de msg
         fprintf(stderr, "Mensagem: "); fgets(corpoMsg,(MAX_NUM_MSG-1),stdin);
+        strcpy(paramThread->nom,nomeUsr);
         strcpy(paramThread->dest,destUsr);
         strcpy(paramThread->corpoMsg,corpoMsg);
         rq = pthread_create(&enviaMsg, NULL, &t2, (void *) paramThread);
         errsv = errno;
         if(rq) trataErro(errsv);
-        // Aguarda o retorno da thread de envio para retornar ao loop
-        // mudar isso aqui => função blockante !!!
+        // Aguarda o retorno da thread de envio e recebimento para retornar ao loop
+        // mudar isso aqui => funções blockantes !!!
         pthread_join(enviaMsg, NULL);
     	} // FIM DO SEGUNDO IF-ELSE DO CONSOLE
     } // FIM DO PRIMEIRO IF-ELSE DO CONSOLE

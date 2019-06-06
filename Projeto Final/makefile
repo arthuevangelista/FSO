@@ -8,13 +8,13 @@ CC = gcc
 CFLAGS = -g
 LIBS = -lpthread -lrt
 
-APPNAME = a14016686chat
+APPNAME = a.out # a140016686chat
 CODE = main.c
 
 install:
 	@echo "Compilando aplicativo de chat ..."
-	$(CC) $(CFLAGS) $(CODE) -o $(APPNAME) $(LIBS)
+	@$(CC) $(CFLAGS) $(CODE) -o $(APPNAME) $(LIBS)
 
 clean:
 	@echo "Deletando binário ..."
-	rm -f $(APPNAME)
+	@rm -f $(APPNAME)
