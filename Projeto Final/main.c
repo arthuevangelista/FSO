@@ -154,7 +154,11 @@ void listagemUsr(){
   struct dirent * atual;
 
   mqDir = opendir("~/dev/mqueue"); errsv = errno;
-  if(mqDir == NULL) fprintf(stderr, "Não há usuários online!");
+  if(mqDir == NULL){
+    fprintf(stderr, "Não há usuários online!\n");
+    rq = closedir(mqDir);
+    return;
+  }
 
 
   fprintf(stderr, "Usuários online\n");
@@ -170,8 +174,7 @@ void listagemUsr(){
 
   fprintf(stderr, "Total de usuários disponíveis: %d\n", i);
 
-  rq = closedir(mqDir); errsv = errno;
-  if(rq == -1) trataErro(errsv);
+  rq = closedir(mqDir);
 } // FIM DA FUNÇÃO DE LISTAGEM DOS USUÁRIOS
 
 // =======================================================================
@@ -203,7 +206,7 @@ static void t1(union sigval sv /*void* param*/){
 
   fprintf(stderr, "%s: %s\n", "dest"/*quem enviou a msg*/,buffer);
 
-  free(nomeFila); free(buffer);
+  free(buffer);
   pthread_exit(NULL);
 } // FIM DA THREAD DE RECEBIMENTO DE MENSAGENS
 
